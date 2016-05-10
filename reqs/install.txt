@@ -1,0 +1,4 @@
+attrs
+click
+gmusicapi>=10.0.0
+pyyaml
