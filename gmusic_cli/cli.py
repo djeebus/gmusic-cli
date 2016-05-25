@@ -36,6 +36,32 @@ def cli(ctx, config):
     }
 
 
+@cli.command('downloaded')
+@click.pass_context
+def downloaded(ctx):
+    tracks = ctx.obj['tracks']
+
+    downloaded = []
+    bytes = 0
+    for t in tracks:
+        client_id = t.get('clientId')
+        if client_id and '-' not in client_id:
+            downloaded.append(t)
+            bytes += int(t['estimatedSize'])
+
+    print("downloaded: %s / %s"
+          % (len(downloaded), len(tracks)))
+    print('total size: %s GB'
+          % (bytes / 1024 / 1024 / 1024))
+
+    # key_func = lambda t: t['kind']
+    # tracks = sorted(tracks, key=key_func)
+    # grouped_tracks = itertools.groupby(tracks, key=key_func)
+    # for kind, tracks in grouped_tracks:
+    #     count = len(list(tracks))
+    #     print("%s: %s" % (kind, count))
+
+
 @cli.command('years')
 @click.pass_context
 def years(ctx):
