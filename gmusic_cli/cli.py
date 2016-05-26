@@ -73,7 +73,21 @@ def years(ctx):
     tracks_by_year = itertools.groupby(
         tracks, key=year_key,
     )
+    tracks_by_year = [
+        (year, sum(1 for t in tracks))
+        for year, tracks in tracks_by_year
+        if year
+    ]
 
-    for year, tracks in tracks_by_year:
-        track_count = sum(1 for t in tracks)
-        print("%s: %s" % (year, track_count))
+    draw_chart(tracks_by_year)
+
+
+def draw_chart(data, max_width=50):
+    max_data = max(data, key=lambda d: d[1])[1]
+    data_per_pixel = int(max_data/max_width)
+
+    for label, value in data:
+        # import pdb; pdb.set_trace()
+        format = "{k:4} | {v}"
+        pixels = '▇' * int(value / data_per_pixel)
+        print(format.format(k=label, v=pixels))
