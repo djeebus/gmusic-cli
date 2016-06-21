@@ -1,17 +1,19 @@
 import click
 import gmusicapi
 import itertools
+import re
 import requests
 import requests.packages
 
 from gmusic_cli.config import get_config
-from gmusic_cli.library import TrackLibrary
+from gmusic_cli.library import TrackLibrary, is_downloaded
 
 
 @click.group()
 @click.option('--config', default='~/.gmusic/config.yaml')
+@click.option('--cache/--no-cache', default=True, is_flag=True)
 @click.pass_context
-def cli(ctx, config):
+def cli(ctx, config, cache):
     config = get_config(config)
 
     api = gmusicapi.Mobileclient(validate=True, verify_ssl=True)
@@ -21,7 +23,7 @@ def cli(ctx, config):
         config.username,
         config.password,
         config.device_id,
-     ):
+    ):
         print("Failed to login")
         exit(1)
 
@@ -29,7 +31,7 @@ def cli(ctx, config):
 
     library = TrackLibrary(api)
 
-    tracks = library.get_tracks()
+    tracks = library.get_tracks(cache)
     ctx.obj = {
         'api': api,
         'tracks': tracks,
@@ -41,25 +43,70 @@ def cli(ctx, config):
 def downloaded(ctx):
     tracks = ctx.obj['tracks']
 
-    downloaded = []
-    bytes = 0
-    for t in tracks:
-        client_id = t.get('clientId')
-        if client_id and '-' not in client_id:
-            downloaded.append(t)
-            bytes += int(t['estimatedSize'])
+    downloaded_tracks = []
+    total_bytes = 0
+    for t in filter(is_downloaded, tracks):
+        downloaded_tracks.append(t)
+        total_bytes += int(t['estimatedSize'])
 
     print("downloaded: %s / %s"
-          % (len(downloaded), len(tracks)))
+          % (len(downloaded_tracks), len(tracks)))
     print('total size: %s GB'
-          % (bytes / 1024 / 1024 / 1024))
+          % (total_bytes / 1024 / 1024 / 1024))
 
-    # key_func = lambda t: t['kind']
-    # tracks = sorted(tracks, key=key_func)
-    # grouped_tracks = itertools.groupby(tracks, key=key_func)
-    # for kind, tracks in grouped_tracks:
-    #     count = len(list(tracks))
-    #     print("%s: %s" % (kind, count))
+
+def _format_query(track):
+    parts = [
+        track['artist'],
+        track['title'],
+    ]
+
+    return ' '.join(
+        p for p in parts if p
+    )
+
+
+def _get_best_result(expected, results):
+    if not results['song_hits']:
+        return
+
+    non_chars = re.compile(r'^[a-z0-9]', re.IGNORECASE)
+
+    def clean(t):
+        return non_chars.sub(t, '')
+
+    for song_hit in results['song_hits']:
+        track = song_hit['track']
+
+        match_keys = ['artist', 'album', 'title']
+
+        def is_match(k):
+            return clean(track[k]) == clean(expected[k])
+
+        if all(map(is_match, match_keys)):
+            return track
+
+
+@cli.command('match-tracks')
+@click.pass_context
+def match_tracks(ctx):
+    tracks = ctx.obj['tracks']
+    api = ctx.obj['api']
+    for track in filter(is_downloaded, tracks):
+        query = _format_query(track)
+        results = api.search(query)
+
+        best_result = _get_best_result(track, results)
+        if not best_result:
+            print("no result for '%s - %s'"
+                  % (track['artist'], track['title']))
+            continue
+
+        api.delete_songs(track['id'])
+
+        print("adding '%s - %s'"
+              % (best_result['artist'], best_result['title']))
+        api.add_store_track(best_result['storeId'])
 
 
 @cli.command('years')
@@ -84,7 +131,7 @@ def years(ctx):
 
 def draw_chart(data, max_width=50):
     max_data = max(data, key=lambda d: d[1])[1]
-    data_per_pixel = int(max_data/max_width)
+    data_per_pixel = int(max_data / max_width)
 
     for label, value in data:
         pixels = '▇' * int(value / data_per_pixel)

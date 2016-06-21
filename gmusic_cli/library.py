@@ -2,6 +2,17 @@ import json
 import os.path
 
 
+def is_downloaded(track):
+    client_id = track.get('clientId')
+    if not client_id:
+        return False
+
+    if '-' in client_id:
+        return False
+
+    return True
+
+
 class TrackLibrary:
     fname = '~/.gmusic/tracks.json'
 
@@ -24,8 +35,8 @@ class TrackLibrary:
     def _load_cached_tracks(self):
         return self._cache.get()
 
-    def get_tracks(self, ignore_cache=False):
-        if not ignore_cache:
+    def get_tracks(self, use_cache=True):
+        if use_cache:
             tracks = self._load_cached_tracks()
             if tracks:
                 return tracks
