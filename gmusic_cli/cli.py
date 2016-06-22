@@ -93,16 +93,23 @@ def match_tracks(ctx):
     tracks = ctx.obj['tracks']
     api = ctx.obj['api']
     for track in filter(is_downloaded, tracks):
+        track_description = '%s - %s' % (
+            track['artist'], track['title'],
+        )
+
         query = _format_query(track)
         results = api.search(query)
 
         best_result = _get_best_result(track, results)
         if not best_result:
-            print("no result for '%s - %s'"
-                  % (track['artist'], track['title']))
+            print("no result for '%s'" % track_description)
             continue
 
-        api.delete_songs(track['id'])
+        try:
+            api.delete_songs(track['id'])
+        except gmusicapi.exceptions.CallFailure:
+            print("failed to delete '%s'" % track_description)
+            continue
 
         print("adding '%s - %s'"
               % (best_result['artist'], best_result['title']))
