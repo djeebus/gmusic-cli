@@ -92,7 +92,9 @@ def _get_best_result(expected, results):
 def match_tracks(ctx):
     tracks = ctx.obj['tracks']
     api = ctx.obj['api']
-    for track in filter(is_downloaded, tracks):
+    downloaded_tracks = filter(is_downloaded, tracks)
+    sorted_tracks = sorted(downloaded_tracks, key=lambda t: t['artist'])
+    for track in sorted_tracks:
         track_description = '%s - %s' % (
             track['artist'], track['title'],
         )
