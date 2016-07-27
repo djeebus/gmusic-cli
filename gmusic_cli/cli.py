@@ -4,9 +4,14 @@ import itertools
 import re
 import requests
 import requests.packages
+import time
 
+from gmusic_cli.youtube import YoutubeClient
 from gmusic_cli.config import get_config
 from gmusic_cli.library import TrackLibrary, is_downloaded
+from googleapiclient.errors import HttpError
+
+youtube_api_key = 'AIzaSyCl5XXa40qM6JmJ3YU6HGpttyrI1dnyCq4'
 
 
 @click.group()
@@ -35,6 +40,7 @@ def cli(ctx, config, cache):
     ctx.obj = {
         'api': api,
         'tracks': tracks,
+        'config': config,
     }
 
 
@@ -136,6 +142,84 @@ def years(ctx):
     ]
 
     draw_chart(tracks_by_year)
+
+
+@cli.group('export')
+@click.pass_context
+@click.option('--thumbs-up', help='export thumbs up playlist', is_flag=True)
+def export(ctx, thumbs_up):
+    tracks = ctx.obj['tracks']
+    if thumbs_up:
+        tracks = [
+            t for t in tracks
+            if t.get('rating') == '5'
+        ]
+    ctx.obj['filtered'] = tracks
+
+
+@export.command('to-youtube')
+@click.argument('playlist_name')
+@click.pass_context
+def to_youtube(ctx, playlist_name):
+    tracks = ctx.obj['filtered']
+    print("%s tracks" % len(tracks))
+
+    config = ctx.obj['config']
+
+    client = YoutubeClient(config.username,
+                           config.password)
+
+    playlists = client.get_playlists()
+
+    export_playlist = None
+    for p in playlists:
+        title = p['snippet']['localized']['title']
+        if title == playlist_name:
+            export_playlist = p
+
+    if not export_playlist:
+        export_playlist = client.create_playlist(playlist_name)
+
+    playlist_items = client.get_playlist_items(export_playlist)
+    playlist_items = list(playlist_items)
+
+    existing_youtube_ids = {
+        playlist_item['snippet']['resourceId']['videoId']
+        for playlist_item in playlist_items
+    }
+    print('playlist has %s tracks' % len(playlist_items))
+
+    def is_yt_track(track):
+        if 'primaryVideo' not in track:
+            return False
+
+        return track['primaryVideo']['kind'] == 'sj#video'
+
+    song_youtube_ids = [
+        track['primaryVideo']['id']
+        for track in tracks
+        if is_yt_track(track)
+    ]
+    print('music library has %s tracks with videos'
+          % len(song_youtube_ids))
+
+    for song_youtube_id in song_youtube_ids:
+        if song_youtube_id in existing_youtube_ids:
+            continue
+
+        add_video_to_playlist(client, export_playlist, song_youtube_id)
+        existing_youtube_ids.add(song_youtube_id)
+
+
+def add_video_to_playlist(client, mtv_playlist, song_youtube_id):
+    print("adding %s" % song_youtube_id)
+    try:
+        client.insert_playlist_item(
+            mtv_playlist, song_youtube_id,
+        )
+    except HttpError as e:
+        print("error %s" % e)
+        time.sleep(1)
 
 
 def draw_chart(data, max_width=50):
