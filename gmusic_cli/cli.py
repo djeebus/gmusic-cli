@@ -124,6 +124,24 @@ def match_tracks(ctx):
         api.add_store_track(best_result['storeId'])
 
 
+@cli.command('videos')
+@click.pass_context
+def videos(ctx):
+    tracks = ctx.obj['tracks']
+
+    videos = []
+    video_types = set()
+    for t in tracks:
+        if 'primaryVideo' in t:
+            video = t['primaryVideo']
+            videos.append(video)
+            video_types.add(video['kind'])
+
+    import pprint
+    pprint.pprint(videos)
+    pprint.pprint(video_types)
+
+
 @cli.command('years')
 @click.pass_context
 def years(ctx):
