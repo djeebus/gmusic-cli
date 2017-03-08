@@ -162,6 +162,33 @@ def years(ctx):
     draw_chart(tracks_by_year)
 
 
+@cli.command('genres')
+@click.pass_context
+def genres(ctx):
+    tracks = ctx.obj['tracks']
+
+    # sort, group and count by genre
+    genre_key = lambda t: t.get('genre', '')
+    tracks = sorted(tracks, key=genre_key)
+    tracks_by_genre = itertools.groupby(tracks, key=genre_key)
+    tracks_by_genre = [
+        (genre, sum(1 for t in tracks))
+        for genre, tracks in tracks_by_genre
+        if genre
+    ]
+
+    # justify first columns
+    max_width = max(len(genre) for genre, count in tracks_by_genre)
+    tracks_by_genre = [
+        (genre.ljust(max_width), count)
+        for genre, count in tracks_by_genre
+    ]
+
+    tracks_by_genre = sorted(tracks_by_genre, key=lambda gc: gc[1])
+
+    draw_chart(tracks_by_genre)
+
+
 @cli.group('export')
 @click.pass_context
 @click.option('--thumbs-up', help='export thumbs up playlist', is_flag=True)
