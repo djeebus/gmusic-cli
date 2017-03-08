@@ -2,7 +2,7 @@ import json
 import os.path
 
 
-def is_downloaded(track):
+def is_uploaded(track):
     client_id = track.get('clientId')
     if not client_id:
         return False

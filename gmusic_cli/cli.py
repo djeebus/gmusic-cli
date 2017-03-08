@@ -8,7 +8,7 @@ import time
 
 from gmusic_cli.youtube import YoutubeClient
 from gmusic_cli.config import get_config
-from gmusic_cli.library import TrackLibrary, is_downloaded
+from gmusic_cli.library import TrackLibrary, is_uploaded
 from googleapiclient.errors import HttpError
 
 youtube_api_key = 'AIzaSyCl5XXa40qM6JmJ3YU6HGpttyrI1dnyCq4'
@@ -44,21 +44,19 @@ def cli(ctx, config, cache):
     }
 
 
-@cli.command('downloaded')
+@cli.command('uploaded')
 @click.pass_context
-def downloaded(ctx):
+def uploaded(ctx):
     tracks = ctx.obj['tracks']
 
-    downloaded_tracks = []
+    uploaded_tracks = []
     total_bytes = 0
-    for t in filter(is_downloaded, tracks):
-        downloaded_tracks.append(t)
+    for t in filter(is_uploaded, tracks):
+        uploaded_tracks.append(t)
         total_bytes += int(t['estimatedSize'])
 
-    print("downloaded: %s / %s"
-          % (len(downloaded_tracks), len(tracks)))
-    print('total size: %s GB'
-          % (total_bytes / 1024 / 1024 / 1024))
+    print("uploaded: %s / %s" % (len(uploaded_tracks), len(tracks)))
+    print('total size: %s GB' % (total_bytes / 1024 / 1024 / 1024))
 
 
 def _format_query(track):
@@ -98,7 +96,7 @@ def _get_best_result(expected, results):
 def match_tracks(ctx):
     tracks = ctx.obj['tracks']
     api = ctx.obj['api']
-    downloaded_tracks = filter(is_downloaded, tracks)
+    downloaded_tracks = filter(is_uploaded, tracks)
     sorted_tracks = sorted(downloaded_tracks, key=lambda t: t['artist'])
     for track in sorted_tracks:
         track_description = '%s - %s' % (
