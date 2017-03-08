@@ -272,5 +272,7 @@ def draw_chart(data, max_width=50):
     data_per_pixel = int(max_data / max_width)
 
     for label, value in data:
+        if data_per_pixel == 0:
+            continue
         pixels = '▇' * int(value / data_per_pixel)
         print('{k:4} | {v}'.format(k=label, v=pixels))
