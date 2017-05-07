@@ -1,17 +1,43 @@
 import click
 import gmusicapi
 import itertools
+import mutagen.id3
+import os
 import re
 import requests
 import requests.packages
 import time
+import urllib.request
 
 from gmusic_cli.youtube import YoutubeClient
 from gmusic_cli.config import get_config
 from gmusic_cli.library import TrackLibrary, is_uploaded
 from googleapiclient.errors import HttpError
 
+device_id = '0011221122334455'
 youtube_api_key = 'AIzaSyCl5XXa40qM6JmJ3YU6HGpttyrI1dnyCq4'
+
+
+class LazyLoginWrapper:
+    def __init__(self, api, config):
+        self._api = api
+        self._config = config
+
+    def __getattr__(self, item):
+        if not hasattr(self._api, 'android_id'):
+            login_result = self._api.login(
+                self._config.username,
+                self._config.password,
+                self._config.device_id,
+            )
+
+            if not login_result:
+                print("Failed to login")
+                exit(1)
+
+            print("successfully logged in")
+
+        return self._api.__getattribute__(item)
 
 
 @click.group()
@@ -22,17 +48,8 @@ def cli(ctx, config, cache):
     config = get_config(config)
 
     api = gmusicapi.Mobileclient(validate=True, verify_ssl=True)
+    api = LazyLoginWrapper(api, config)
     requests.packages.urllib3.disable_warnings()
-
-    if not api.login(
-        config.username,
-        config.password,
-        config.device_id,
-    ):
-        print("Failed to login")
-        exit(1)
-
-    print("successfully logged in")
 
     library = TrackLibrary(api)
 
@@ -274,3 +291,173 @@ def draw_chart(data, max_width=50):
             continue
         pixels = '▇' * int(value / data_per_pixel)
         print('{k:4} | {v}'.format(k=label, v=pixels))
+
+
+@cli.command()
+@click.option('--artist')
+@click.option('--album')
+@click.argument('destination')
+@click.pass_context
+def download(ctx,  artist, album, destination):
+    tracks = ctx.obj['tracks']
+
+    def is_match(track):
+        if artist and track.get('albumArtist', '').lower() != artist.lower():
+            return False
+
+        if album and track.get('album', '').lower() != album.lower():
+            return False
+
+        return True
+
+    tracks = filter(is_match, tracks)
+    tracks = list(tracks)
+
+    print("Downloading %s tracks ... " % len(tracks))
+    for track in tracks:
+        download_track(ctx.obj['api'], destination, track)
+
+
+invalid_chars = \
+    ['"', '<', '>', '|', ':', '*', '?', '\\', '/'] + \
+    list(map(chr, range(0, 0x1F)))
+
+
+def _clean_file_name(fname):
+    filename = fname or ''
+    clean_filename = ''.join(c for c in filename if c not in invalid_chars)
+    stripped = clean_filename.strip()
+    return stripped
+
+
+def get_file_name(track):
+    artist = track.get('albumArtist')
+    is_compilation_album = artist == 'Various Artists'
+    if not artist or is_compilation_album:
+        artist = track.get('artist')
+    if not artist:
+        artist = 'Unknown artist'
+    if artist == 'Christoper Titus':
+        artist = 'Christopher Titus'
+    artist = _clean_file_name(artist)
+
+    title = track.get('title')
+    if not title:
+        title = 'Unnamed track'
+    title = _clean_file_name(title)
+
+    track_number = track.get('trackNumber', 0)
+    year = track.get('year', 0)
+    album = _clean_file_name(track.get('album'))
+
+    if is_compilation_album:
+        if year:
+            format_string = u'{album} [{year}]{sep}{track:02d} - {artist} - {title}.mp3'
+        else:
+            format_string = u'{album}{sep}{track:02d} - {artist} - {title}.mp3'
+    else:
+        if year and album:
+            format_string = u'{artist}{sep}[{year}] {album}{sep}{track:02d} - {title}.mp3'
+        elif album:
+            format_string = u'{artist}{sep}{album}{sep}{track:02d} - {title}.mp3'
+        else:
+            format_string = u'{artist}{sep}{title}.mp3'
+
+    magic_sep = '!@#@!'
+    file_name = format_string.format(
+        artist=artist.rstrip('.'),
+        year=year,
+        title=title,
+        track=track_number,
+        album=album.rstrip('.'),
+        sep=magic_sep,
+    )
+    parts = file_name.split(magic_sep)
+    file_name = os.path.join(*parts)
+
+    return file_name
+
+
+def set_metadata(fname, track):
+    try:
+        tags = mutagen.id3.ID3(fname)
+    except mutagen.id3.ID3NoHeaderError:
+        tags = mutagen.id3.ID3()
+
+    def _set_text(clazz, text):
+        def _coerce_text(ugly_text):
+            if not isinstance(ugly_text, str):
+                ugly_text = str(ugly_text)
+
+            return ugly_text
+
+        def _create_text_clazz(data):
+            return clazz(encoding=3, text=data)
+
+        return _set_or_add_tag(clazz, text, _create_text_clazz, _coerce_text)
+
+    def _set_image(name, image_refs):
+        image_ref_url = image_refs[0]['url'] if image_refs else None
+
+        def _create_image_clazz(url):
+            fd = urllib.request.urlopen(url)
+            data = fd.read()
+
+            return mutagen.id3.APIC(
+                encoding=3,
+                mime='image/jpeg',
+                desc=name,
+                type=3,
+                data=data,
+            )
+
+        return _set_or_add_tag('APIC:%s' % name, image_ref_url, _create_image_clazz)
+
+    def _set_or_add_tag(tag_name, data, create_tag, coerce_data=None):
+        info = tags.get(tag_name)
+        if info:
+            if tag_name.startswith('APIC:'):
+                return  # these are expensive
+
+            del tags[tag_name]
+
+        if coerce_data:
+            data = coerce_data(data)
+
+        if not data:
+            return
+
+        tag = create_tag(data)
+        tags.add(tag)
+
+    _set_text(mutagen.id3.TDRC, track.get('year'))
+    _set_text(mutagen.id3.TIT2, track.get('title'))
+
+    # track number
+    _set_text(mutagen.id3.TRCK, track.get('trackNumber'))
+
+    # lead performer
+    _set_text(mutagen.id3.TPE1, track.get('albumArtist', track.get('artist')))
+
+    # album title
+    _set_text(mutagen.id3.TALB, track.get('album'))
+
+    _set_image('Cover', track.get('albumArtRef'))
+
+    tags.save(fname)
+
+
+def download_track(api, root_path, track):
+    local_file_name = get_file_name(track)
+    full_path = os.path.join(root_path, local_file_name)
+    if os.path.exists(full_path):
+        return
+
+    dirname = os.path.dirname(full_path)
+    os.makedirs(dirname, exist_ok=True)
+
+    print('downloading %s ... ' % local_file_name)
+    stream_url = api.get_stream_url(track['nid'], device_id)
+    urllib.request.urlretrieve(stream_url, full_path)
+
+    set_metadata(full_path, track)
