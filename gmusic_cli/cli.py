@@ -296,12 +296,16 @@ def draw_chart(data, max_width=50):
 @cli.command()
 @click.option('--artist')
 @click.option('--album')
+@click.option('--thumbs-up', is_flag=True)
 @click.argument('destination')
 @click.pass_context
-def download(ctx,  artist, album, destination):
+def download(ctx,  artist, album, destination, thumbs_up):
     tracks = ctx.obj['tracks']
 
     def is_match(track):
+        if thumbs_up and track.get('rating') != '5':
+            return False
+
         if artist and track.get('albumArtist', '').lower() != artist.lower():
             return False
 
@@ -451,13 +455,19 @@ def download_track(api, root_path, track):
     local_file_name = get_file_name(track)
     full_path = os.path.join(root_path, local_file_name)
     if os.path.exists(full_path):
+        print("skipping %s, already exists" % local_file_name)
         return
 
     dirname = os.path.dirname(full_path)
     os.makedirs(dirname, exist_ok=True)
 
     print('downloading %s ... ' % local_file_name)
-    stream_url = api.get_stream_url(track['nid'], device_id)
+    try:
+        stream_url = api.get_stream_url(track['nid'], device_id)
+    except gmusicapi.exceptions.CallFailure as e:
+        print('--- error getting track: %s ---' % e)
+        return
+
     urllib.request.urlretrieve(stream_url, full_path)
 
     set_metadata(full_path, track)
