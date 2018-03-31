@@ -18,26 +18,46 @@ device_id = '0011221122334455'
 youtube_api_key = 'AIzaSyCl5XXa40qM6JmJ3YU6HGpttyrI1dnyCq4'
 
 
-class LazyLoginWrapper:
-    def __init__(self, api, config):
-        self._api = api
+class LazyApiLoginWrapper:
+
+    def __init__(self, client, config):
+        self._client = client
         self._config = config
+        self._authenticated = False
 
     def __getattr__(self, item):
-        if not hasattr(self._api, 'android_id'):
-            login_result = self._api.login(
+        if not self._authenticated:
+            self._authenticated = self._client.login(
                 self._config.username,
                 self._config.password,
                 self._config.device_id,
             )
 
-            if not login_result:
+            if not self._authenticated:
                 print("Failed to login")
                 exit(1)
 
             print("successfully logged in")
 
-        return self._api.__getattribute__(item)
+        return self._client.__getattribute__(item)
+
+
+class LazyManagerLoginWrapper:
+    def __init__(self, client):
+        self._authenticated = False
+        self._client = client
+
+    def __getattr__(self, item):
+        if not self._authenticated:
+            success = self._client.login()
+
+            if not success:
+                self._client.perform_oauth()
+                exit(1)
+
+            self._authenticated = True
+
+        return self._client.__getattribute__(item)
 
 
 @click.group()
@@ -47,8 +67,11 @@ class LazyLoginWrapper:
 def cli(ctx, config, cache):
     config = get_config(config)
 
-    api = gmusicapi.Mobileclient(validate=True, verify_ssl=True)
-    api = LazyLoginWrapper(api, config)
+    api = gmusicapi.Mobileclient()
+    mgr = gmusicapi.Musicmanager()
+
+    api = LazyApiLoginWrapper(api, config)
+    mgr = LazyManagerLoginWrapper(mgr)
     requests.packages.urllib3.disable_warnings()
 
     library = TrackLibrary(api)
@@ -58,6 +81,7 @@ def cli(ctx, config, cache):
         'api': api,
         'tracks': tracks,
         'config': config,
+        'mgr': mgr
     }
 
 
@@ -318,8 +342,43 @@ def download(ctx,  artist, album, destination, thumbs_up):
     tracks = list(tracks)
 
     print("Downloading %s tracks ... " % len(tracks))
-    for track in tracks:
-        download_track(ctx.obj['api'], destination, track)
+
+    def get_fname(track):
+        local_file_name = get_file_name(track)
+        full_path = os.path.join(destination, local_file_name)
+        return full_path
+
+    track_fnames = (
+        (track, get_fname(track))
+        for track in tracks
+    )
+
+    missing_tracks = [
+        (t, fname)
+        for t, fname in track_fnames
+        if not os.path.exists(fname)
+    ]
+
+    for index, (track, full_path) in enumerate(missing_tracks, start=1):
+        """Couldn't find a consistent way to differentiate between uploaded 
+        tracks and store tracks, just try one, then the other"""
+
+        dirname = os.path.dirname(full_path)
+        os.makedirs(dirname, exist_ok=True)
+
+        print(f'downloading {index}/{len(missing_tracks)}')
+
+        try:
+            download_store_track(ctx.obj['api'], full_path, track)
+        except Exception as e:
+            print('\terror getting store track, trying for user track: %s' % e)
+            try:
+                download_user_track(ctx.obj['mgr'], full_path, track)
+            except Exception as e:
+                print('\terror getting user track: %s' % e)
+                continue
+
+        set_metadata(full_path, track)
 
 
 invalid_chars = \
@@ -451,23 +510,17 @@ def set_metadata(fname, track):
     tags.save(fname)
 
 
-def download_track(api, root_path, track):
-    local_file_name = get_file_name(track)
-    full_path = os.path.join(root_path, local_file_name)
-    if os.path.exists(full_path):
-        print("skipping %s, already exists" % local_file_name)
-        return
-
-    dirname = os.path.dirname(full_path)
-    os.makedirs(dirname, exist_ok=True)
-
-    print('downloading %s ... ' % local_file_name)
-    try:
-        stream_url = api.get_stream_url(track['nid'], device_id)
-    except gmusicapi.exceptions.CallFailure as e:
-        print('--- error getting track: %s ---' % e)
-        return
-
+def download_store_track(api, full_path, track):
+    stream_url = api.get_stream_url(track['nid'], device_id)
     urllib.request.urlretrieve(stream_url, full_path)
 
-    set_metadata(full_path, track)
+
+def download_user_track(mgr, full_path, track):
+    fname, audio = mgr.download_song(track['id'])
+
+    with open(full_path, 'wb') as fp:
+        fp.write(audio)
+
+
+if __name__ == '__main__':
+    cli()
