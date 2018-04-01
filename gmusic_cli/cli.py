@@ -1,4 +1,5 @@
 import click
+import collections
 import gmusicapi
 import itertools
 import mutagen.id3
@@ -7,6 +8,7 @@ import re
 import requests
 import requests.packages
 import time
+import unicodedata
 import urllib.request
 
 from gmusic_cli.youtube import YoutubeClient
@@ -16,6 +18,9 @@ from googleapiclient.errors import HttpError
 
 device_id = '0011221122334455'
 youtube_api_key = 'AIzaSyCl5XXa40qM6JmJ3YU6HGpttyrI1dnyCq4'
+
+THUMBS_UP_RATING = '5'
+THUMBS_DOWN_RATING = '1'
 
 
 class LazyApiLoginWrapper:
@@ -236,7 +241,7 @@ def export(ctx, thumbs_up):
     if thumbs_up:
         tracks = [
             t for t in tracks
-            if t.get('rating') == '5'
+            if t.get('rating') == THUMBS_UP_RATING
         ]
     ctx.obj['filtered'] = tracks
 
@@ -321,13 +326,32 @@ def draw_chart(data, max_width=50):
 @click.option('--artist')
 @click.option('--album')
 @click.option('--thumbs-up', is_flag=True)
+@click.option('--good-albums', is_flag=True)
+@click.option('--min-album-rating', default=5)
 @click.argument('destination')
 @click.pass_context
-def download(ctx,  artist, album, destination, thumbs_up):
+def download(
+    ctx,  artist, album, destination, thumbs_up, good_albums, min_album_rating,
+):
     tracks = ctx.obj['tracks']
 
+    if good_albums:
+        album_ratings = collections.defaultdict(int)
+        tracks_by_album_id = collections.defaultdict(list)
+        for track in tracks:
+            aid = track.get('albumId')
+            if not aid:
+                continue
+
+            if track.get('rating') == THUMBS_UP_RATING:
+                album_ratings[aid] += 1
+            tracks_by_album_id[aid].append(track)
+
     def is_match(track):
-        if thumbs_up and track.get('rating') != '5':
+        if track.get('rating') == THUMBS_DOWN_RATING:
+            return False
+
+        if thumbs_up and track.get('rating') != THUMBS_UP_RATING:
             return False
 
         if artist and track.get('albumArtist', '').lower() != artist.lower():
@@ -336,6 +360,15 @@ def download(ctx,  artist, album, destination, thumbs_up):
         if album and track.get('album', '').lower() != album.lower():
             return False
 
+        album_id = track.get('albumId')
+        if good_albums:
+            if not album_id:
+                return False
+
+            rating = album_ratings[album_id]
+            if rating < min_album_rating:
+                return False
+
         return True
 
     tracks = filter(is_match, tracks)
@@ -343,35 +376,37 @@ def download(ctx,  artist, album, destination, thumbs_up):
 
     print("Downloading %s tracks ... " % len(tracks))
 
-    def get_fname(track):
-        local_file_name = get_file_name(track)
-        full_path = os.path.join(destination, local_file_name)
-        return full_path
-
     track_fnames = (
-        (track, get_fname(track))
+        (track, get_file_name(track))
         for track in tracks
     )
 
     missing_tracks = [
-        (t, fname)
+        (t, fname, os.path.join(destination, fname))
         for t, fname in track_fnames
         if not os.path.exists(fname)
     ]
 
-    for index, (track, full_path) in enumerate(missing_tracks, start=1):
+    for index, (track, fname, full_path) in enumerate(missing_tracks, start=1):
         """Couldn't find a consistent way to differentiate between uploaded 
         tracks and store tracks, just try one, then the other"""
 
         dirname = os.path.dirname(full_path)
         os.makedirs(dirname, exist_ok=True)
 
-        print(f'downloading {index}/{len(missing_tracks)}')
+        print(f'downloading {index}/{len(missing_tracks)}: {fname}')
 
         try:
-            download_store_track(ctx.obj['api'], full_path, track)
+            if 'nid' in track:
+                download_store_track(ctx.obj['api'], full_path, track)
+                success = True
+            else:
+                success = False
         except Exception as e:
             print('\terror getting store track, trying for user track: %s' % e)
+            success = False
+
+        if not success:
             try:
                 download_user_track(ctx.obj['mgr'], full_path, track)
             except Exception as e:
@@ -386,11 +421,16 @@ invalid_chars = \
     list(map(chr, range(0, 0x1F)))
 
 
-def _clean_file_name(fname):
-    filename = fname or ''
-    clean_filename = ''.join(c for c in filename if c not in invalid_chars)
-    stripped = clean_filename.strip()
-    return stripped
+def _clean_file_name(value):
+    """
+    Normalizes string, converts to lowercase, removes non-alpha characters,
+    and converts spaces to hyphens.
+    """
+    value = unicodedata.normalize('NFKD', value).encode('ascii', 'ignore')
+    value = value.decode('ascii')
+    value = value.strip()
+    value = ''.join(c for c in value if c not in invalid_chars)
+    return value
 
 
 def get_file_name(track):
