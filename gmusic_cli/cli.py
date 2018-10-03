@@ -468,9 +468,8 @@ def download(
         estimated_size = int(track.get('estimatedSize'))
         disk_size = os.path.getsize(path)
         min_size = estimated_size * .95
-        max_size = estimated_size * 1.05
-        if disk_size < min_size or disk_size > max_size:
-            print(f'deleting {fname}, corrupt')
+        if disk_size < min_size:
+            print(f'deleting {fname}, corrupt : {min_size} > {disk_size}')
             os.unlink(path)
             return True
 
