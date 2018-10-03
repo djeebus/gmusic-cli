@@ -456,10 +456,29 @@ def download(
         for track in tracks
     )
 
-    missing_tracks = [
+    track_fnames = (
         (t, fname, os.path.join(destination, fname))
         for t, fname in track_fnames
-        if not os.path.exists(fname)
+    )
+
+    def should_download(track, fname, path):
+        if not os.path.exists(path):
+            return True
+
+        estimated_size = int(track.get('estimatedSize'))
+        disk_size = os.path.getsize(path)
+        min_size = estimated_size * .95
+        max_size = estimated_size * 1.05
+        if disk_size < min_size or disk_size > max_size:
+            print(f'deleting {fname}, corrupt')
+            os.unlink(path)
+            return True
+
+        return False
+
+    missing_tracks = [
+        info for info in track_fnames
+        if should_download(*info)
     ]
 
     api: gmusicapi.Mobileclient = ctx.obj['api']
@@ -471,7 +490,7 @@ def download(
             break
     else:
         click.echo("No registered devices found")
-        exit(1)
+        return exit(1)
 
     device_id = device['id'].lstrip('0x')
 
