@@ -1,32 +1,39 @@
 import os.path
 import yaml
 
-from attr import attributes, attr, validators
+from attr import attributes, attr, validators, asdict
 
 
 valid_str = validators.instance_of(str)
 
-str_attr = attr(validator=valid_str)
+optional_str_attr = attr(
+    validator=validators.optional(valid_str),
+    default='',
+)
 
 
 @attributes
 class Config:
-    username = str_attr
-    password = str_attr
-    device_id = str_attr
+    username = optional_str_attr
+    password = optional_str_attr
 
 
-def get_config(fname):
-    fname = os.path.expanduser(fname)
-    fname = os.path.abspath(fname)
+def get_config(path):
 
-    with open(fname) as f:
+    if not os.path.exists(path):
+        return Config()
+
+    with open(path) as f:
         config = yaml.load(f)
 
     return Config(
         username=config['username'],
         password=config['password'],
-        device_id=config['device_id'],
     )
 
 
+def set_config(path, config: Config):
+    config = asdict(config)
+
+    with open(path, 'w') as fp:
+        yaml.dump(config, fp)

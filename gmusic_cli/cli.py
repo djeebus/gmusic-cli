@@ -12,15 +12,18 @@ import unicodedata
 import urllib.request
 
 from gmusic_cli.youtube import YoutubeClient
-from gmusic_cli.config import get_config
+from gmusic_cli.config import get_config, Config, set_config
 from gmusic_cli.library import TrackLibrary, is_uploaded
 from googleapiclient.errors import HttpError
 
-device_id = '0011221122334455'
 youtube_api_key = 'AIzaSyCl5XXa40qM6JmJ3YU6HGpttyrI1dnyCq4'
 
 THUMBS_UP_RATING = '5'
 THUMBS_DOWN_RATING = '1'
+
+
+class AuthError(Exception):
+    pass
 
 
 class LazyApiLoginWrapper:
@@ -30,64 +33,136 @@ class LazyApiLoginWrapper:
         self._config = config
         self._authenticated = False
 
+    def validate(self):
+        if not self._client.login(
+            self._config.username,
+            self._config.password,
+            gmusicapi.Mobileclient.FROM_MAC_ADDRESS,
+        ):
+            raise AuthError()
+
     def __getattr__(self, item):
         if not self._authenticated:
-            self._authenticated = self._client.login(
-                self._config.username,
-                self._config.password,
-                self._config.device_id,
-            )
-
-            if not self._authenticated:
-                print("Failed to login")
+            try:
+                self.validate()
+                self._authenticated = True
+            except AuthError:
+                print("Failed to login to mobile client")
                 exit(1)
-
-            print("successfully logged in")
 
         return self._client.__getattribute__(item)
 
 
 class LazyManagerLoginWrapper:
-    def __init__(self, client):
+    def __init__(self, client: gmusicapi.Musicmanager, cred_path):
         self._authenticated = False
         self._client = client
+        self.cred_path = cred_path
+
+    def validate(self):
+        if not self._client.login(
+            oauth_credentials=self.cred_path,
+        ):
+            raise AuthError()
 
     def __getattr__(self, item):
         if not self._authenticated:
-            success = self._client.login()
-
-            if not success:
-                self._client.perform_oauth()
+            try:
+                self.validate()
+                self._authenticated = True
+            except:
+                print("Failed to login to manager")
                 exit(1)
-
-            self._authenticated = True
 
         return self._client.__getattribute__(item)
 
 
 @click.group()
-@click.option('--config', default='~/.gmusic/config.yaml')
+@click.option('--config', default='~/.config/gmusic/')
 @click.option('--cache/--no-cache', default=True, is_flag=True)
 @click.pass_context
 def cli(ctx, config, cache):
-    config = get_config(config)
+    config_dir = os.path.expanduser(config)
+    config_dir = os.path.abspath(config_dir)
+
+    os.makedirs(config_dir, exist_ok=True)
+
+    oauth_cred_path = os.path.join(config_dir, OAUTH_CRED_FNAME)
+    config_path = os.path.join(config_dir, CONFIG_FNAME)
+
+    config = get_config(config_path)
 
     api = gmusicapi.Mobileclient()
     mgr = gmusicapi.Musicmanager()
 
     api = LazyApiLoginWrapper(api, config)
-    mgr = LazyManagerLoginWrapper(mgr)
+    mgr = LazyManagerLoginWrapper(mgr, oauth_cred_path)
     requests.packages.urllib3.disable_warnings()
 
-    library = TrackLibrary(api)
+    library = TrackLibrary(api, cache)
 
-    tracks = library.get_tracks(cache)
     ctx.obj = {
         'api': api,
-        'tracks': tracks,
+        'tracks': library,
         'config': config,
+        'config_path': config_path,
+        'oauth_path': oauth_cred_path,
         'mgr': mgr
     }
+
+
+CONFIG_FNAME = 'config.yaml'
+OAUTH_CRED_FNAME = 'oauth.cred'
+
+
+@cli.command('validate')
+@click.pass_context
+def validate(ctx):
+    config = ctx.obj['config']
+    config_path = ctx.obj['config_path']
+    oauth_cred_path = ctx.obj['oauth_path']
+
+    click.echo("Testing mobile client credentials ... ")
+
+    creds_changed = False
+    while True:
+        try:
+            ctx.obj['api'].validate()
+            break
+        except AuthError:
+            _fix_api_creds(config)
+            creds_changed = True
+
+    if creds_changed:
+        click.echo("Saving credentials ...")
+        set_config(config_path, config)
+
+    click.echo("Testing music manager credentials ...")
+    while True:
+        try:
+            ctx.obj['mgr'].validate()
+            break
+        except AuthError:
+            _fix_mgr_creds(oauth_cred_path)
+
+    click.echo("Credentials are valid!")
+
+
+def _fix_api_creds(config: Config):
+    username = click.prompt('Username')
+    password = click.prompt('Password', hide_input=True)
+
+    config.username = username
+    config.password = password
+
+
+def _fix_mgr_creds(oauth_cred_path):
+    click.echo("Using oauth to login to music manager ... ")
+    mgr = gmusicapi.Musicmanager()
+    mgr.perform_oauth(
+        open_browser=True,
+        storage_filepath=oauth_cred_path,
+    )
 
 
 @cli.command('uploaded')
@@ -326,8 +401,8 @@ def draw_chart(data, max_width=50):
 @click.option('--artist')
 @click.option('--album')
 @click.option('--thumbs-up', is_flag=True)
-@click.option('--good-albums', is_flag=True)
-@click.option('--min-album-rating', default=5)
+@click.option('--good-albums', is_flag=True, show_default=True)
+@click.option('--min-album-rating', default=5, show_default=True)
 @click.argument('destination')
 @click.pass_context
 def download(
@@ -387,6 +462,19 @@ def download(
         if not os.path.exists(fname)
     ]
 
+    api: gmusicapi.Mobileclient = ctx.obj['api']
+    mgr: gmusicapi.Musicmanager = ctx.obj['mgr']
+
+    devices = api.get_registered_devices()
+    for device in devices:
+        if device['type'] == 'ANDROID':
+            break
+    else:
+        click.echo("No registered devices found")
+        exit(1)
+
+    device_id = device['id'].lstrip('0x')
+
     for index, (track, fname, full_path) in enumerate(missing_tracks, start=1):
         """Couldn't find a consistent way to differentiate between uploaded 
         tracks and store tracks, just try one, then the other"""
@@ -398,7 +486,7 @@ def download(
 
         try:
             if 'nid' in track:
-                download_store_track(ctx.obj['api'], full_path, track)
+                download_store_track(api, full_path, track, device_id)
                 success = True
             else:
                 success = False
@@ -408,7 +496,7 @@ def download(
 
         if not success:
             try:
-                download_user_track(ctx.obj['mgr'], full_path, track)
+                download_user_track(mgr, full_path, track)
             except Exception as e:
                 print('\terror getting user track: %s' % e)
                 continue
@@ -550,12 +638,12 @@ def set_metadata(fname, track):
     tags.save(fname)
 
 
-def download_store_track(api, full_path, track):
-    stream_url = api.get_stream_url(track['nid'], device_id)
+def download_store_track(api: gmusicapi.Mobileclient, full_path, track, device_id):
+    stream_url = api.get_stream_url(track['nid'], device_id=device_id)
     urllib.request.urlretrieve(stream_url, full_path)
 
 
-def download_user_track(mgr, full_path, track):
+def download_user_track(mgr:  gmusicapi.Musicmanager, full_path, track):
     fname, audio = mgr.download_song(track['id'])
 
     with open(full_path, 'wb') as fp:

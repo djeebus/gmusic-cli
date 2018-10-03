@@ -16,9 +16,10 @@ def is_uploaded(track):
 class TrackLibrary:
     fname = '~/.gmusic/tracks.json'
 
-    def __init__(self, api):
+    def __init__(self, api, use_cache):
         self._api = api
         self._cache = TrackCache(self.fname)
+        self._read_from_cache = use_cache
 
     def _download_tracks(self):
         results = self._api.get_all_songs(
@@ -32,25 +33,36 @@ class TrackLibrary:
 
             print("Done with page %s" % (index + 1))
 
-    def _load_cached_tracks(self):
+    @property
+    def _cached_tracks(self):
         return self._cache.get()
 
-    def get_tracks(self, use_cache=True):
-        if use_cache:
-            tracks = self._load_cached_tracks()
+    def get_tracks(self):
+        if self._read_from_cache:
+            tracks = self._cached_tracks
             if tracks:
-                return tracks
+                yield from tracks
+                return
 
-        new_tracks = self._download_tracks()
-        new_tracks = list(new_tracks)
+        new_tracks = []
+        for track in self._download_tracks():
+            yield track
+            new_tracks.append(track)
+
         self._cache.set(new_tracks)
 
-        return new_tracks
+    def __iter__(self):
+        yield from self.get_tracks()
+
+    def __len__(self):
+        tracks = self._cache.get()
+        return len(tracks)
 
 
 class TrackCache:
     def __init__(self, fname):
         self.fname = self._path(fname)
+        self._local = None
 
     @staticmethod
     def _path(fname):
@@ -59,13 +71,19 @@ class TrackCache:
         return fname
 
     def get(self):
+        if self._local is not None:
+            return self._local
+
         if not os.path.isfile(self.fname):
             return
 
         with open(self.fname, 'r') as f:
-            return json.load(f)
+            self._local = json.load(f)
+
+        return self._local
 
     def set(self, value):
-
         with open(self.fname, 'w') as f:
             json.dump(value, f)
+
+        self._local = value
