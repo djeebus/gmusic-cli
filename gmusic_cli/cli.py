@@ -402,7 +402,7 @@ def draw_chart(data, max_width=50):
 @click.option('--album')
 @click.option('--thumbs-up', is_flag=True)
 @click.option('--good-albums', is_flag=True, show_default=True)
-@click.option('--min-album-rating', default=5, show_default=True)
+@click.option('--min-album-rating', default=3, show_default=True)
 @click.argument('destination')
 @click.pass_context
 def download(
@@ -412,15 +412,16 @@ def download(
 
     if good_albums:
         album_ratings = collections.defaultdict(int)
-        tracks_by_album_id = collections.defaultdict(list)
         for track in tracks:
             aid = track.get('albumId')
             if not aid:
                 continue
 
-            if track.get('rating') == THUMBS_UP_RATING:
+            track_rating = track.get('rating')
+            if track_rating == THUMBS_UP_RATING:
                 album_ratings[aid] += 1
-            tracks_by_album_id[aid].append(track)
+            elif track_rating == THUMBS_DOWN_RATING:
+                album_ratings[aid] -= 1
 
     def is_match(track):
         if track.get('rating') == THUMBS_DOWN_RATING:
@@ -467,7 +468,7 @@ def download(
 
         estimated_size = int(track.get('estimatedSize'))
         disk_size = os.path.getsize(path)
-        min_size = estimated_size * .95
+        min_size = estimated_size * .90
         if disk_size < min_size:
             print(f'deleting {fname}, corrupt : {min_size} > {disk_size}')
             os.unlink(path)
