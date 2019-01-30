@@ -1,0 +1,6 @@
+exclude *
+
+include setup.py
+include reqs/*.txt
+
+recursive-include gmusic_cli *.py

@@ -16,10 +16,9 @@ def is_uploaded(track):
 class TrackLibrary:
     fname = '~/.gmusic/tracks.json'
 
-    def __init__(self, api, use_cache):
+    def __init__(self, api):
         self._api = api
         self._cache = TrackCache(self.fname)
-        self._read_from_cache = use_cache
 
     def _download_tracks(self):
         results = self._api.get_all_songs(
@@ -37,19 +36,13 @@ class TrackLibrary:
     def _cached_tracks(self):
         return self._cache.get()
 
-    def get_tracks(self):
-        if self._read_from_cache:
-            tracks = self._cached_tracks
-            if tracks:
-                yield from tracks
-                return
-
+    def refresh(self):
         new_tracks = []
-        for track in self._download_tracks():
-            yield track
-            new_tracks.append(track)
-
+        new_tracks += self._download_tracks()
         self._cache.set(new_tracks)
+
+    def get_tracks(self):
+        yield from self._cached_tracks
 
     def __iter__(self):
         yield from self.get_tracks()

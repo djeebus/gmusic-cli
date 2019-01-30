@@ -79,9 +79,8 @@ class LazyManagerLoginWrapper:
 
 @click.group()
 @click.option('--config', default='~/.config/gmusic/')
-@click.option('--cache/--no-cache', default=True, is_flag=True)
 @click.pass_context
-def cli(ctx, config, cache):
+def cli(ctx, config):
     config_dir = os.path.expanduser(config)
     config_dir = os.path.abspath(config_dir)
 
@@ -99,7 +98,7 @@ def cli(ctx, config, cache):
     mgr = LazyManagerLoginWrapper(mgr, oauth_cred_path)
     requests.packages.urllib3.disable_warnings()
 
-    library = TrackLibrary(api, cache)
+    library = TrackLibrary(api)
 
     ctx.obj = {
         'api': api,
@@ -109,6 +108,13 @@ def cli(ctx, config, cache):
         'oauth_path': oauth_cred_path,
         'mgr': mgr
     }
+
+
+@cli.command('refresh')
+@click.pass_context
+def refresh(ctx):
+    library: TrackLibrary = ctx.obj['tracks']
+    library.refresh()
 
 
 CONFIG_FNAME = 'config.yaml'
@@ -397,17 +403,32 @@ def draw_chart(data, max_width=50):
         print('{k:4} | {v}'.format(k=label, v=pixels))
 
 
+def get_device_id(api: gmusicapi.Mobileclient):
+    devices = api.get_registered_devices()
+    # TODO: sort devices by the last accessed time, grab the most recent
+    for device in devices:
+        if device['type'] != 'ANDROID':
+            continue
+
+        return device['id'].lstrip('0x')
+
+    raise Exception('could not find an android device id')
+
+
 @cli.command()
 @click.option('--artist')
 @click.option('--album')
 @click.option('--thumbs-up', is_flag=True)
 @click.option('--good-albums', is_flag=True, show_default=True)
-@click.option('--min-album-rating', default=3, show_default=True)
-@click.argument('destination')
+@click.option('--min-album-rating', default=5, show_default=True)
+@click.argument('destination', type=click.Path(file_okay=False))
 @click.pass_context
 def download(
     ctx,  artist, album, destination, thumbs_up, good_albums, min_album_rating,
 ):
+    api: gmusicapi.Mobileclient = ctx.obj['api']
+    device_id = get_device_id(api)
+
     tracks = ctx.obj['tracks']
 
     if good_albums:
@@ -511,6 +532,7 @@ def download(
                 success = False
         except Exception as e:
             print('\terror getting store track, trying for user track: %s' % e)
+
             success = False
 
         if not success:
@@ -518,7 +540,7 @@ def download(
                 download_user_track(mgr, full_path, track)
             except Exception as e:
                 print('\terror getting user track: %s' % e)
-                continue
+                exit(1)
 
         set_metadata(full_path, track)
 
@@ -540,15 +562,58 @@ def _clean_file_name(value):
     return value
 
 
+def get_sortable_artist(artist):
+    """
+    Clean up artist names
+
+    >>> get_sortable_artist('The Strokes')
+    'Strokes, The'
+    >>> get_sortable_artist('Anberlin')
+    'Anberlin'
+    >>> get_sortable_artist('A Perfect Circle')
+    'Perfect Circle, A'
+    """
+    for prefix in ('the', 'a', 'an'):
+        if artist[:len(prefix) + 1].lower() == f'{prefix} ':
+            artist = artist[len(prefix) + 1:] + ', ' + artist[:len(prefix)]
+            break
+
+    return artist
+
+
+def get_path_char(path):
+    """
+    Get the path prefix char
+    >>> get_path_char('2pac')
+    '#'
+    >>> get_path_char('blink-182')
+    'B'
+    """
+    char = path[0]
+    if char.isnumeric():
+        return '#'
+
+    return char.upper()
+
+
+artist_fixes = {
+    'Christoper Titus': 'Christopher Titus',
+}
+
+
 def get_file_name(track):
+    """
+    Get the path and file name of a track.
+    >>> get_file_name({'albumArtist': 'The Weeknd', 'title': 'Starboy (feat. Daft Punk)', 'trackNumber': 1, 'album': 'Starboy', 'year': 2016})
+    'W/Weeknd, The/[2016] Starboy/01 - Starboy (feat. Daft Punk).mp3'
+    """
     artist = track.get('albumArtist')
     is_compilation_album = artist == 'Various Artists'
     if not artist or is_compilation_album:
         artist = track.get('artist')
     if not artist:
         artist = 'Unknown artist'
-    if artist == 'Christoper Titus':
-        artist = 'Christopher Titus'
+    artist = artist_fixes.get(artist, artist)
     artist = _clean_file_name(artist)
 
     title = track.get('title')
@@ -559,13 +624,19 @@ def get_file_name(track):
     track_number = track.get('trackNumber', 0)
     year = track.get('year', 0)
     album = _clean_file_name(track.get('album'))
+    artist = artist.rstrip('.')
+    album = album.rstrip('.')
 
     if is_compilation_album:
+        album = get_sortable_artist(album)
+        path_char = 'VA-' + get_path_char(album)
         if year:
             format_string = u'{album} [{year}]{sep}{track:02d} - {artist} - {title}.mp3'
         else:
             format_string = u'{album}{sep}{track:02d} - {artist} - {title}.mp3'
     else:
+        artist = get_sortable_artist(artist)
+        path_char = get_path_char(artist)
         if year and album:
             format_string = u'{artist}{sep}[{year}] {album}{sep}{track:02d} - {title}.mp3'
         elif album:
@@ -573,8 +644,11 @@ def get_file_name(track):
         else:
             format_string = u'{artist}{sep}{title}.mp3'
 
+    format_string = '{char}{sep}' + format_string
+
     magic_sep = '!@#@!'
     file_name = format_string.format(
+        char=path_char,
         artist=artist.rstrip('.'),
         year=year,
         title=title,
