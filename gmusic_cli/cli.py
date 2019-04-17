@@ -449,12 +449,8 @@ def to(cls):
 
 
 @to(list)
-def _get_global_tracks(api: gmusicapi.Mobileclient, artist_id, album_id):
-    album_ids = []
-    if album_id:
-        album_ids.append(album_id)
-
-    if artist_id:
+def _get_global_tracks(api: gmusicapi.Mobileclient, artist_ids, album_ids):
+    for artist_id in artist_ids:
         results = api.get_artist_info(artist_id)
         for album_stub in results['albums']:
             album_id = album_stub['albumId']
@@ -467,9 +463,9 @@ def _get_global_tracks(api: gmusicapi.Mobileclient, artist_id, album_id):
 
 @cli.command()
 @click.option('--artist')
-@click.option('--artist-id')
+@click.option('--artist-id', multiple=True)
 @click.option('--album')
-@click.option('--album-id')
+@click.option('--album-id', multiple=True)
 @click.option('--thumbs-up', is_flag=True)
 @click.option('--library', is_flag=True)
 @click.option('--good-albums', is_flag=True, show_default=True)
