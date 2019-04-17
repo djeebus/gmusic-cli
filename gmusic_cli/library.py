@@ -14,7 +14,7 @@ def is_uploaded(track):
 
 
 class TrackLibrary:
-    fname = '~/.gmusic/tracks.json'
+    fname = '~/.config/gmusic/tracks.json'
 
     def __init__(self, api):
         self._api = api
