@@ -450,6 +450,9 @@ def to(cls):
 
 @to(list)
 def _get_global_tracks(api: gmusicapi.Mobileclient, artist_ids, album_ids):
+    artist_ids = list(artist_ids)
+    album_ids = list(album_ids)
+
     for artist_id in artist_ids:
         results = api.get_artist_info(artist_id)
         for album_stub in results['albums']:
