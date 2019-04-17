@@ -1,9 +1,11 @@
 import click
 import collections
+import functools
 import gmusicapi
 import itertools
 import mutagen.id3
 import os
+import pprint
 import re
 import requests
 import requests.packages
@@ -417,19 +419,73 @@ def get_device_id(api: gmusicapi.Mobileclient):
 
 @cli.command()
 @click.option('--artist')
+@click.pass_context
+@click.option('--download', type=click.Path(file_okay=False))
+def search(ctx, artist, download):
+    query = filter(None, (artist,))
+    query = ' '.join(query)
+
+    api: gmusicapi.Mobileclient = ctx.obj['api']
+    results = api.search(query)
+
+    if artist:
+        print('Artists:')
+        for artist_result in results['artist_hits']:
+            artist_info = artist_result['artist']
+            print(f'\t{artist_info["name"]} [{artist_info["artistId"]}]')
+
+    pprint.pprint(results.keys())
+    exit(1)
+
+
+def to(cls):
+    def to_wrapper(func):
+        @functools.wraps(func)
+        def to_inner(*args, **kwargs):
+            results = func(*args, **kwargs)
+            return cls(results)
+        return to_inner
+    return to_wrapper
+
+
+@to(list)
+def _get_global_tracks(api: gmusicapi.Mobileclient, artist_id, album_id):
+    album_ids = []
+    if album_id:
+        album_ids.append(album_id)
+
+    if artist_id:
+        results = api.get_artist_info(artist_id)
+        for album_stub in results['albums']:
+            album_id = album_stub['albumId']
+            album_ids.append(album_id)
+
+    for album_id in album_ids:
+        album = api.get_album_info(album_id)
+        yield from album['tracks']
+
+
+@cli.command()
+@click.option('--artist')
+@click.option('--artist-id')
 @click.option('--album')
+@click.option('--album-id')
 @click.option('--thumbs-up', is_flag=True)
+@click.option('--library', is_flag=True)
 @click.option('--good-albums', is_flag=True, show_default=True)
 @click.option('--min-album-rating', default=5, show_default=True)
 @click.argument('destination', type=click.Path(file_okay=False))
 @click.pass_context
 def download(
-    ctx,  artist, album, destination, thumbs_up, good_albums, min_album_rating,
+    ctx,  artist, artist_id, album, album_id, destination, thumbs_up,
+    good_albums, min_album_rating, library,
 ):
     api: gmusicapi.Mobileclient = ctx.obj['api']
-    device_id = get_device_id(api)
 
-    tracks = ctx.obj['tracks']
+    if library:
+        tracks = ctx.obj['tracks']
+    else:
+        tracks = _get_global_tracks(api, artist_id, album_id)
 
     if good_albums:
         album_ratings = collections.defaultdict(int)
