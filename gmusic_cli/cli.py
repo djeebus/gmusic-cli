@@ -9,6 +9,7 @@ import pprint
 import re
 import requests
 import requests.packages
+import tempfile
 import time
 import unicodedata
 import urllib.request
@@ -789,15 +790,28 @@ def set_metadata(fname, track):
 
 
 def download_store_track(api: gmusicapi.Mobileclient, full_path, track, device_id):
-    stream_url = api.get_stream_url(track['nid'], device_id=device_id)
-    urllib.request.urlretrieve(stream_url, full_path)
+    dirname = os.path.dirname(full_path)
+    fp, temp_path = tempfile.mkstemp(dir=dirname)
+    try:
+        stream_url = api.get_stream_url(track['nid'], device_id=device_id)
+        urllib.request.urlretrieve(stream_url, temp_path)
+        os.rename(temp_path, full_path)
+    finally:
+        if os.path.exists(temp_path):
+            os.unlink(temp_path)
 
 
 def download_user_track(mgr:  gmusicapi.Musicmanager, full_path, track):
-    fname, audio = mgr.download_song(track['id'])
+    dirname = os.path.dirname(full_path)
+    fp, temp_path = tempfile.mkstemp(dir=dirname)
 
-    with open(full_path, 'wb') as fp:
+    try:
+        fname, audio = mgr.download_song(track['id'])
         fp.write(audio)
+        os.rename(temp_path, full_path)
+    finally:
+        if os.path.exists(temp_path):
+            os.unlink(temp_path)
 
 
 if __name__ == '__main__':
