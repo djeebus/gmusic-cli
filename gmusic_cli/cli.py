@@ -474,11 +474,12 @@ def _get_global_tracks(api: gmusicapi.Mobileclient, artist_id, album_id):
 @click.option('--library', is_flag=True)
 @click.option('--good-albums', is_flag=True, show_default=True)
 @click.option('--min-album-rating', default=5, show_default=True)
+@click.option('--char-prefix', is_flag=True)
 @click.argument('destination', type=click.Path(file_okay=False))
 @click.pass_context
 def download(
     ctx,  artist, artist_id, album, album_id, destination, thumbs_up,
-    good_albums, min_album_rating, library,
+    good_albums, min_album_rating, library, char_prefix,
 ):
     api: gmusicapi.Mobileclient = ctx.obj['api']
 
@@ -530,7 +531,7 @@ def download(
     print("Downloading %s tracks ... " % len(tracks))
 
     track_fnames = (
-        (track, get_file_name(track))
+        (track, get_file_name(track, add_char_prefix=char_prefix))
         for track in tracks
     )
 
@@ -657,7 +658,7 @@ artist_fixes = {
 }
 
 
-def get_file_name(track):
+def get_file_name(track, *, add_char_prefix):
     """
     Get the path and file name of a track.
     >>> get_file_name({'albumArtist': 'The Weeknd', 'title': 'Starboy (feat. Daft Punk)', 'trackNumber': 1, 'album': 'Starboy', 'year': 2016})
@@ -700,7 +701,8 @@ def get_file_name(track):
         else:
             format_string = u'{artist}{sep}{title}.mp3'
 
-    format_string = '{char}{sep}' + format_string
+    if add_char_prefix:
+        format_string = '{char}{sep}' + format_string
 
     magic_sep = '!@#@!'
     file_name = format_string.format(
