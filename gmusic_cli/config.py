@@ -24,7 +24,7 @@ def get_config(path):
         return Config()
 
     with open(path) as f:
-        config = yaml.load(f)
+        config = yaml.safe_load(f)
 
     return Config(
         username=config['username'],
@@ -36,4 +36,4 @@ def set_config(path, config: Config):
     config = asdict(config)
 
     with open(path, 'w') as fp:
-        yaml.dump(config, fp)
+        yaml.safe_dump(config, fp)

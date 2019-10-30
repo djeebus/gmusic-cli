@@ -31,18 +31,29 @@ class AuthError(Exception):
 
 class LazyApiLoginWrapper:
 
-    def __init__(self, client, config):
+    def __init__(self, client: gmusicapi.Mobileclient, config):
         self._client = client
         self._config = config
         self._authenticated = False
 
     def validate(self):
-        if not self._client.login(
-            self._config.username,
-            self._config.password,
-            gmusicapi.Mobileclient.FROM_MAC_ADDRESS,
-        ):
+        try:
+            result = self._client.login(
+                self._config.username,
+                self._config.password,
+                'AA:BB:CC:11:22:33',
+            )
+        except gmusicapi.exceptions.InvalidDeviceId as e:
+            result = self._client.login(
+                self._config.username,
+                self._config.password,
+                e.valid_device_ids[0],
+            )
+
+        if not result:
             raise AuthError()
+
+        return True
 
     def __getattr__(self, item):
         if not self._authenticated:
