@@ -136,8 +136,9 @@ OAUTH_CRED_FNAME = 'oauth.cred'
 
 
 @cli.command('validate')
+@click.option('--open-browser/--no-open-browser', default=True)
 @click.pass_context
-def validate(ctx):
+def validate(ctx, open_browser):
     config = ctx.obj['config']
     config_path = ctx.obj['config_path']
     oauth_cred_path = ctx.obj['oauth_path']
@@ -162,8 +163,8 @@ def validate(ctx):
         try:
             ctx.obj['mgr'].validate()
             break
-        except AuthError:
-            _fix_mgr_creds(oauth_cred_path)
+        except AuthError as e:
+            _fix_mgr_creds(oauth_cred_path, open_browser)
 
     click.echo("Credentials are valid!")
 
@@ -176,11 +177,11 @@ def _fix_api_creds(config: Config):
     config.password = password
 
 
-def _fix_mgr_creds(oauth_cred_path):
+def _fix_mgr_creds(oauth_cred_path, open_browser):
     click.echo("Using oauth to login to music manager ... ")
     mgr = gmusicapi.Musicmanager()
     mgr.perform_oauth(
-        open_browser=True,
+        open_browser=open_browser,
         storage_filepath=oauth_cred_path,
     )
 
