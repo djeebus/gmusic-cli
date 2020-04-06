@@ -153,7 +153,7 @@ def track_filterer_factory(
         filters.append(match_good_album)
 
     if not filters:
-        return lambda ts: ts
+        return lambda: tracks
 
     @to(list)
     def matcher():
