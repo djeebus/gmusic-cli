@@ -432,8 +432,7 @@ def get_device_id(api: gmusicapi.Mobileclient):
 @cli.command()
 @click.option('--artist')
 @click.pass_context
-@click.option('--download', type=click.Path(file_okay=False))
-def search(ctx, artist, download):
+def search(ctx, artist):
     query = filter(None, (artist,))
     query = ' '.join(query)
 

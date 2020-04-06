@@ -109,6 +109,7 @@ def cli(
                 download_user_track(mgr, full_path, track)
             except Exception as e:
                 print('\terror getting user track: %s' % e)
+                exit(1)
 
         set_metadata(full_path, track)
 
