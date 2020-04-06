@@ -44,10 +44,10 @@ def cli(
         for track in tracks
     )
 
-    track_fnames = (
+    track_fnames = [
         (t, fname, os.path.join(destination, fname))
         for t, fname in track_fnames
-    )
+    ]
 
     def should_download(track, fname, path):
         if not os.path.exists(path):
@@ -63,10 +63,13 @@ def cli(
 
         return False
 
-    missing_tracks = [
-        info for info in track_fnames
-        if should_download(*info)
-    ]
+    click.echo(f"Finding {len(track_fnames)} existing tracks ...")
+    progress = ProgressTimer(len(track_fnames), click.echo)
+    missing_tracks = []
+    for index, info in enumerate(track_fnames):
+        progress.progress(index)
+        if should_download(*info):
+            missing_tracks.append(info)
 
     api: gmusicapi.Mobileclient = ctx.obj['api']
     mgr: gmusicapi.Musicmanager = ctx.obj['mgr']
@@ -388,7 +391,9 @@ def _get_global_tracks(api: gmusicapi.Mobileclient, artist_ids, album_ids):
     if not album_ids:
         return
 
-    click.echo(f'finding info on {len(album_ids)} ...')
-    for album_id in album_ids:
+    click.echo(f'finding tracks for {len(album_ids)} albums ...')
+    timer = ProgressTimer(len(album_ids), click.echo)
+    for index, album_id in enumerate(album_ids):
+        timer.progress(index)
         album = api.get_album_info(album_id)
         yield from album['tracks']
