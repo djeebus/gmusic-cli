@@ -22,5 +22,5 @@ setup(
             'gmusic-cli = gmusic_cli.cli:cli',
         ]
     },
-    install_requires=get_reqs('install.txt')
+    install_requires=get_reqs('install.txt'),
 )

@@ -7,20 +7,22 @@ import tempfile
 import unicodedata
 import urllib.request
 
+from gmusic_cli import (
+    THUMBS_DOWN_RATING,
+    THUMBS_UP_RATING,
+)
 from gmusic_cli.util import (
     ProgressTimer,
     to,
 )
-
-THUMBS_UP_RATING = '5'
-THUMBS_DOWN_RATING = '1'
 
 
 @click.option('--artist')
 @click.option('--artist-id', multiple=True)
 @click.option('--album')
 @click.option('--album-id', multiple=True)
-@click.option('--thumbs-up', is_flag=True)
+@click.option('--only-thumbs-up', is_flag=True)
+@click.option('--allow-thumbs-down', is_flag=True)
 @click.option('--library/--global', is_flag=True, default=True)
 @click.option('--min-album-rating', default=0, show_default=True)
 @click.option('--char-prefix', is_flag=True)
@@ -36,8 +38,7 @@ def cli(
     else:
         tracks = _get_global_tracks(api, artist_id, album_id)
 
-    filter_tracks = track_filterer_factory(tracks, **kwargs)
-    tracks = filter_tracks()
+    tracks = filter_tracks(tracks, **kwargs)
 
     track_fnames = (
         (track, get_file_name(track, add_char_prefix=char_prefix))
@@ -116,14 +117,22 @@ def cli(
         progress.progress(index)
 
 
-def track_filterer_factory(
-    tracks, *, thumbs_up, artist, album, min_album_rating,
+def filter_tracks(
+    tracks, *,
+    allow_thumbs_down: bool = False,
+    only_thumbs_up: bool = False,
+    artist: str = None,
+    album: str = None,
+    min_album_rating: int = None,
 ):
     filters = []
     if artist:
         filters.append(lambda t: t.get('albumArtist', '').lower() == artist.lower())
 
-    if thumbs_up:
+    if allow_thumbs_down is False:
+        filters.append(lambda t: t.get('rating') != THUMBS_DOWN_RATING)
+
+    if only_thumbs_up:
         filters.append(lambda t: t.get('rating') == THUMBS_UP_RATING)
 
     if album:
@@ -151,18 +160,16 @@ def track_filterer_factory(
             if rating < min_album_rating:
                 return False
 
+            return True
+
         filters.append(match_good_album)
 
     if not filters:
-        return lambda: tracks
+        return tracks
 
-    @to(list)
-    def matcher():
-        for t in tracks:
-            if all((match(t) for match in filters)):
-                yield t
-
-    return matcher
+    for t in tracks:
+        if all((match(t) for match in filters)):
+            yield t
 
 
 invalid_chars = \

@@ -1,5 +1,4 @@
 import click
-import functools
 import gmusicapi
 import itertools
 import os
@@ -9,10 +8,8 @@ import requests
 import requests.packages
 import time
 
-from gmusic_cli.cli.download import (
-    cli as download_cli,
-    THUMBS_UP_RATING,
-)
+from gmusic_cli import THUMBS_UP_RATING
+from gmusic_cli.cli.download import cli as download_cli
 from gmusic_cli.youtube import YoutubeClient
 from gmusic_cli.config import get_config, set_config
 from gmusic_cli.library import TrackLibrary, is_uploaded
