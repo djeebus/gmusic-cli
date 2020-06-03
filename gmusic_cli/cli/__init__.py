@@ -30,6 +30,15 @@ class LazyApiLoginWrapper:
         self._cred_path = cred_path
         self._authenticated = False
 
+        self._device_id = None
+
+    def get_device_id(self):
+        if self._device_id is None:
+            for device in self.api.get_registered_devices():
+                self._device_id = device['id']
+                break
+        return self._device_id
+
     def validate(self):
         try:
             result = self._client.oauth_login(
@@ -41,6 +50,8 @@ class LazyApiLoginWrapper:
                 device_id=e.valid_device_ids[0],
                 oauth_credentials=self._cred_path,
             )
+        except gmusicapi.exceptions.AlreadyLoggedIn:
+            return
 
         if not result:
             raise AuthError()
@@ -58,16 +69,28 @@ class LazyApiLoginWrapper:
 
 
 class LazyManagerLoginWrapper:
-    def __init__(self, client: gmusicapi.Musicmanager, cred_path):
+    def __init__(self, api, client: gmusicapi.Musicmanager, cred_path):
+        self._api = api
         self._authenticated = False
         self._client = client
         self.cred_path = cred_path
 
     def validate(self):
-        if not self._client.login(
-            oauth_credentials=self.cred_path,
-        ):
-            raise AuthError()
+        devices = self._api.get_registered_devices()
+        for device_info in devices:
+            device_id = device_info['id']
+            if len(device_id) != 17:
+                continue
+
+            if not self._client.login(
+                oauth_credentials=self.cred_path,
+                uploader_id=device_id,
+            ):
+                raise AuthError()
+
+            return
+
+        raise Exception('no valid device id found')
 
     def __getattr__(self, item):
         if not self._authenticated:
@@ -100,7 +123,7 @@ def cli(ctx, config):
     mgr = gmusicapi.Musicmanager()
 
     api = LazyApiLoginWrapper(api, mobile_oauth_cred_path)
-    mgr = LazyManagerLoginWrapper(mgr, manager_oauth_cred_path)
+    mgr = LazyManagerLoginWrapper(api, mgr, manager_oauth_cred_path)
     requests.packages.urllib3.disable_warnings()
 
     library = TrackLibrary(api)

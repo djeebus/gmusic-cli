@@ -92,6 +92,8 @@ def cli(
         """Couldn't find a consistent way to differentiate between uploaded 
         tracks and store tracks, just try one, then the other"""
 
+        print(f'download {track["title"]} by {track["artist"]}')
+
         dirname = os.path.dirname(full_path)
         os.makedirs(dirname, exist_ok=True)
 
