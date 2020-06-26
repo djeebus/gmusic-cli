@@ -375,11 +375,11 @@ def download_store_track(api: gmusicapi.Mobileclient, full_path, track, device_i
 
 def download_user_track(mgr:  gmusicapi.Musicmanager, full_path, track):
     dirname = os.path.dirname(full_path)
-    fp, temp_path = tempfile.mkstemp(dir=dirname)
+    temp_path = tempfile.mktemp(dir=dirname)
 
     try:
         fname, audio = mgr.download_song(track['id'])
-        with fp:
+        with open(temp_path, 'wb') as fp:
             fp.write(audio)
         os.rename(temp_path, full_path)
     finally:
